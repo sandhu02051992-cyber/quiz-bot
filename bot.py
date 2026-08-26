@@ -1,3 +1,4 @@
+from telegram.request import HTTPXRequest
 import os
 import logging
 import asyncio
@@ -163,7 +164,8 @@ def main():
         logger.error("No TOKEN found in environment variables!")
         return
         
-    application = Application.builder().token(TOKEN).build()
+   request_kwargs = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
+app = Application.builder().token(TOKEN).request(request_kwargs).build()
     
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(play_quiz_menu, pattern="^play_quiz_menu$"))
