@@ -1,3 +1,4 @@
+from telegram.request import HTTPXRequest
 import os
 import pandas as pd
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -187,7 +188,8 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_question(update, context, questions)
 
 def main():
-    app = Application.builder().token(TOKEN).build()
+    request_kwargs = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
+app = Application.builder().token(TOKEN).request(request_kwargs).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("quiz", start))
     app.add_handler(CallbackQueryHandler(start_quiz_callback, pattern="^start_quiz_now$"))
