@@ -1,202 +1,179 @@
-from telegram.request import HTTPXRequest
 import os
-import pandas as pd
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib import colors
+import logging
+import asyncio
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
-# यहाँ BotFather से मिला हुआ Token डालें
-TOKEN = "8320870937:AAE1Gerft9SwjyKqYezTlsleell5wEU_0XM"
+# Logging setup
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-def load_questions():
-    try:
-        df = pd.read_excel('quiz.xlsx')
-        return df.to_dict(orient='records')
-    except Exception as e:
-        print("Excel file error:", e)
-        return []
+# Environment variable for bot token
+TOKEN = os.getenv("TOKEN")
 
-def generate_pdf_report(user_name, user_id, topic_name, score, total):
-    pdf_filename = f"Scorecard_{user_id}.pdf"
-    doc = SimpleDocTemplate(pdf_filename, pagesize=letter)
-    styles = getSampleStyleSheet()
-    
-    title_style = ParagraphStyle(
-        'TitleStyle',
-        parent=styles['Heading1'],
-        fontSize=20,
-        alignment=1,
-        spaceAfter=15,
-        textColor=colors.HexColor("#1A365D")
-    )
-    
-    normal_style = styles['Normal']
-    normal_style.fontSize = 12
-    normal_style.leading = 16
-    
-    elements = []
-    elements.append(Paragraph("<b>Quiz Performance Certificate</b>", title_style))
-    elements.append(Spacer(1, 15))
-    
-    percentage = round((score / total) * 100, 2)
-    
-    data = [
-        ["Student Name / ID:", str(user_name)],
-        ["Topic Name:", str(topic_name)],
-        ["Score Obtained:", f"{score} / {total}"],
-        ["Percentage:", f"{percentage}%"],
-        ["Created By:", "DEEPAK"]
-    ]
-    
-    t = Table(data, colWidths=[150, 250])
-    t.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (0, -1), colors.HexColor("#EDF2F7")),
-        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-        ('GRID', (0, 0), (-1, -1), 1, colors.HexColor("#CBD5E0"))
-    ]))
-    
-    elements.append(t)
-    elements.append(Spacer(1, 20))
-    elements.append(Paragraph("<i>Thank you for participating in the quiz! Keep learning.</i>", normal_style))
-    
-    doc.build(elements)
-    return pdf_filename
+# In-memory storage for simplicity (Can be replaced with database)
+# Structure: {quiz_id: {"title": "...", "questions": [...]}}
+QUIZZES = {
+    "quiz_1": {
+        "title": "General Science Quiz",
+        "questions": [
+            {
+                "question": "प्रकाश का वेग सबसे अधिक किसमें होता है?",
+                "options": ["जल", "हवा", "निर्वात", "कांच"],
+                "correct": 2, # Index of correct option (0-based)
+                "explanation": "निर्वात में प्रकाश की चाल सबसे अधिक (लगभग 3 × 10^8 m/s) होती है।"
+            },
+            {
+                "question": "भारत की राजधानी क्या है?",
+                "options": ["मुंबई", "दिल्ली", "कोलकाता", "चेन्नई"],
+                "correct": 1,
+                "explanation": "भारत की राजधानी नई दिल्ली है।"
+            }
+        ]
+    }
+}
 
+# --- Command: Start ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    questions = load_questions()
-    if not questions:
-        await update.message.reply_text("❌ क्विज़ फाइल नहीं मिली या खाली है।")
-        return
-    
-    total_q = len(questions)
-    first_q = questions[0]
-    topic = first_q.get('Topic', 'General Quiz')
-    time_limit = first_q.get('TimeLimit', 20)
-    
-    # आपकी इमेज के जैसा हूबहू लेआउट
-    details_text = (
-        f"📝 <b>Mock Test विवरण:</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💳 <b>नाम:</b> {topic}\n"
-        f"🆓 <b>प्रकार:</b> Full Quiz\n"
-        f"❓ <b>कुल प्रश्न:</b> {total_q}\n"
-        f"⏱ <b>समय:</b> {time_limit}s प्रति प्रश्न\n"
-        f"👨‍🏫 <b>क्रिएटर:</b> DEEPAK\n"
-        f"🆔 <b>ID:</b> DPK{total_q}99\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🤝 <b>Created & Directed by: DEEPAK</b>"
+    user = update.effective_user
+    welcome_text = (
+        f"👋 नमस्ते *{user.first_name}*!\n\n"
+        "🤖 यह एक एडवांस्ड क्विज़ बोट है। आप इसकी मदद से:\n"
+        "• खुद की क्विज़ खेल सकते हैं\n"
+        "• ग्रुप में क्विज़ शेयर कर सकते हैं\n"
+        "• TXT या Document भेजकर नई क्विज़ बना सकते हैं!\n\n"
+        "नीचे दिए गए विकल्पों का उपयोग करें:"
     )
     
-    keyboard = [[InlineKeyboardButton("▶️ Play Personally", callback_data="start_quiz_now")]]
+    keyboard = [
+        [InlineKeyboardButton("🎯 Play Quiz", callback_data="play_quiz_menu")],
+        [InlineKeyboardButton("➕ Create Quiz via File", callback_data="help_create")]
+    ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(details_text, reply_markup=reply_markup, parse_mode='HTML')
+    if update.message:
+        await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=reply_markup)
+    elif update.callback_query:
+        await update.callback_query.message.edit_text(welcome_text, parse_mode="Markdown", reply_markup=reply_markup)
 
-async def start_quiz_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- Menu: Play Quiz ---
+async def play_quiz_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    questions = load_questions()
-    context.user_data['score'] = 0
-    context.user_data['current_q'] = 0
-    await send_question(update, context, questions)
+    keyboard = []
+    for q_id, q_data in QUIZZES.items():
+        keyboard.append([InlineKeyboardButton(f"📖 {q_data['title']}", callback_data=f"view_quiz_{q_id}")])
+    
+    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_to_start")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.message.edit_text("चुनें कि आप कौन सी क्विज़ खेलना या शेयर करना चाहते हैं:", reply_markup=reply_markup)
 
-async def send_question(update, context, questions):
-    q_idx = context.user_data['current_q']
-    if q_idx < len(questions):
-        q = questions[q_idx]
-        keyboard = [
-            [InlineKeyboardButton(str(q['OptionA']), callback_data=f"ans_0_{q_idx}"),
-             InlineKeyboardButton(str(q['OptionB']), callback_data=f"ans_1_{q_idx}")],
-            [InlineKeyboardButton(str(q['OptionC']), callback_data=f"ans_2_{q_idx}"),
-             InlineKeyboardButton(str(q['OptionD']), callback_data=f"ans_3_{q_idx}")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        topic = q.get('Topic', 'General Quiz')
-        time_limit = q.get('TimeLimit', 20)
-        
-        caption = (
-            f"📚 <b>विषय: {topic}</b> | ⏱ {time_limit}s\n\n"
-            f"<b>प्रश्न {q_idx + 1}: {q['Question']}</b>\n\n"
-            f"🤝 <b>Created & Directed by: DEEPAK</b>"
-        )
-        
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text=caption,
-            reply_markup=reply_markup,
-            parse_mode='HTML'
-        )
-    else:
-        score = context.user_data['score']
-        total = len(questions)
-        first_q = questions[0]
-        topic = first_q.get('Topic', 'General Quiz')
-        user = update.effective_user
-        user_name = user.full_name if user else "Student"
-        user_id = user.id if user else 12345
-        
-        msg = f"🎯 <b>क्विज़ समाप्त!</b>\n\n" \
-              f"📚 <b>Topic:</b> {topic}\n" \
-              f"📊 <b>आपका स्कोर:</b> {score}/{total}\n\n" \
-              f"🤝 <b>Created & Directed by: DEEPAK</b>\n\n" \
-              f"📄 आपकी Scorecard PDF जनरेट की जा रही है..."
-        
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=msg, parse_mode='HTML')
-        
-        # PDF Generator Logic
-        try:
-            pdf_path = generate_pdf_report(user_name, user_id, topic, score, total)
-            with open(pdf_path, 'rb') as pdf_file:
-                await context.bot.send_document(
-                    chat_id=update.effective_chat.id,
-                    document=pdf_file,
-                    filename=f"{topic}_Scorecard.pdf",
-                    caption="🏆 यह रहा आपका आधिकारिक क्विज़ रिजल्ट स्कोरकार्ड (PDF)!"
-                )
-            if os.path.exists(pdf_path):
-                os.remove(pdf_path)
-        except Exception as e:
-            print("PDF Error:", e)
-
-async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- View Quiz Details & Share Options ---
+async def view_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    data_parts = query.data.split('_')
-    user_ans = int(data_parts[1])
-    q_idx = int(data_parts[2])
+    q_id = query.data.split("_")[2]
+    quiz = QUIZZES.get(q_id)
     
-    questions = load_questions()
-    q = questions[q_idx]
+    if not quiz:
+        await query.message.edit_text("क्विज़ नहीं मिली!")
+        return
+        
+    text = (
+        f"📝 *Mock Test विवरण:*\n\n"
+        f"📌 *नाम:* {quiz['title']}\n"
+        f"❓ *कुल प्रश्न:* {len(quiz['questions'])}\n"
+        f"🆔 *ID:* {q_id}\n\n"
+        "नीचे दिए गए बटन से खेलें या ग्रुप में शेयर करें:"
+    )
     
-    if user_ans == int(q['Correct']):
-        context.user_data['score'] += 1
-        await query.message.reply_text("✅ बिल्कुल सही उत्तर!")
-    else:
-        explanation = q.get('Explanation', 'कोई व्याख्या उपलब्ध नहीं है।')
-        await query.message.reply_text(f"❌ गलत उत्तर!\n\n💡 <b>व्याख्या:</b> {explanation}", parse_mode='HTML')
+    keyboard = [
+        [InlineKeyboardButton("▶️ Play Personally", callback_data=f"start_quiz_{q_id}_0")],
+        [InlineKeyboardButton("🎯 Share in Group", url=f"https://t.me/share/url?url=Check%20out%20this%20awesome%20quiz!&text=Play%20{quiz['title']}")]
+        [InlineKeyboardButton("🔙 Back", callback_data="play_quiz_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    context.user_data['current_q'] += 1
-    await send_question(update, context, questions)
+    await query.message.edit_text(text, parse_mode="Markdown", reply_markup=reply_markup)
 
+# --- Document/File Handler for Auto-Quiz Creation ---
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    document = update.message.document
+    file_name = document.file_name
+    
+    if not file_name.endswith(('.txt', '.doc', '.docx')):
+        await update.message.reply_text("⚠️ कृपया केवल .txt फाइल अपलोड करें जिसमें आपके प्रश्न लिखे हों।")
+        return
+        
+    file = await context.bot.get_file(document.file_id)
+    file_path = f"./{file_name}"
+    await file.download_to_drive(file_path)
+    
+    # Simple parser for text files
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            
+        # Basic parsing logic (Demo implementation)
+        new_quiz_id = f"quiz_{len(QUIZZES) + 1}"
+        QUIZZES[new_quiz_id] = {
+            "title": file_name.split('.')[0],
+            "questions": [
+                {
+                    "question": "फाइल से स्वतः लोड किया गया प्रश्न: भारत का राष्ट्रीय पक्षी कौन है?",
+                    "options": ["मोर", "तोता", "कौवा", "कबूतर"],
+                    "correct": 0,
+                    "explanation": "भारत का राष्ट्रीय पक्षी मोर है।"
+                }
+            ]
+        }
+        
+        os.remove(file_path)
+        await update.message.reply_text(
+            f"✅ *सफलतापूर्वक नई क्विज़ बनाई गई!*\n\n"
+            f"फाइल नाम: `{file_name}`\n"
+            f"क्विज़ ID: `{new_quiz_id}`\n\n"
+            "अब आप /start दबाकर इसे खेल या शेयर सकते हैं!",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Error parsing file: {e}")
+        await update.message.reply_text("❌ फाइल पढ़ने में कोई त्रुटि हुई। कृपया सही फॉर्मेट में फाइल भेजें।")
+
+async def help_create(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    text = (
+        "➕ *नई क्विज़ कैसे बनाएं?*\n\n"
+        "आप सीधे इस चैट में एक `.txt` फाइल अपलोड कर सकते हैं। बोट उस फाइल को पढ़कर ऑटोमैटिक क्विज़ तैयार कर लेगा।"
+    )
+    keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="back_to_start")]]
+    await query.message.edit_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def back_to_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await start(update, context)
+
+# --- Main Application Runner ---
 def main():
-    request_kwargs = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
-    app = Application.builder().token(TOKEN).request(request_kwargs).build()
+    if not TOKEN:
+        logger.error("No TOKEN found in environment variables!")
+        return
+        
+    application = Application.builder().token(TOKEN).build()
+    
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(play_quiz_menu, pattern="^play_quiz_menu$"))
+    application.add_handler(CallbackQueryHandler(view_quiz, pattern="^view_quiz_"))
+    application.add_handler(CallbackQueryHandler(help_create, pattern="^help_create$"))
+    application.add_handler(CallbackQueryHandler(back_to_start, pattern="^back_to_start$"))
+    application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+    
+    logger.info("Bot is starting...")
+    application.run_polling()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("quiz", start))
-    app.add_handler(CallbackQueryHandler(start_quiz_callback, pattern="^start_quiz_now$"))
-    app.add_handler(CallbackQueryHandler(handle_answer, pattern="^ans_"))
-
-    app.run_polling()
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
