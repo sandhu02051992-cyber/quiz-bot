@@ -9,7 +9,7 @@ logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # Environment variable for bot token
-TOKEN = os.getenv("TOKEN")
+TOKEN = os.getenv("8320870937:AAE1Gerft9SwjyKqYezTlsleell5wEU_0XM")
 
 # In-memory storage for simplicity (Can be replaced with database)
 # Structure: {quiz_id: {"title": "...", "questions": [...]}}
