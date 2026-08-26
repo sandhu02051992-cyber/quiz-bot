@@ -9,7 +9,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
 # यहाँ BotFather से मिला हुआ Token डालें
-TOKEN = "8996053059:AAGgpAuFLjfc3cDEpXphxeKW1PBX1COUG60E"
+TOKEN = "8320870937:AAE1Gerft9SwjyKqYezTlsleell5wEU_0XM"
 
 def load_questions():
     try:
