@@ -189,13 +189,13 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     request_kwargs = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0)
-app = Application.builder().token(TOKEN).request(request_kwargs).build()
+    app = Application.builder().token(TOKEN).request(request_kwargs).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("quiz", start))
     app.add_handler(CallbackQueryHandler(start_quiz_callback, pattern="^start_quiz_now$"))
     app.add_handler(CallbackQueryHandler(handle_answer, pattern="^ans_"))
-    
-    print("Bot is running with Mock Test Card format...")
+
     app.run_polling()
 
 if __name__ == '__main__':
